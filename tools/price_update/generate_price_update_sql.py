@@ -128,6 +128,7 @@ def generate_sql(records, output_sql_path, include_backup_table=True):
         
     lines.append("-- --------------------------------------------------------------------")
     lines.append("-- 更新処理本体 (トランザクション開始)")
+    lines.append("-- ※ EC-CUBE は DB の日時を UTC として扱うため、update_date は UTC_TIMESTAMP() で格納します。")
     lines.append("-- --------------------------------------------------------------------")
     lines.append("SET @OLD_SQL_SAFE_UPDATES = @@SQL_SAFE_UPDATES;")
     lines.append("SET SQL_SAFE_UPDATES = 0;")
@@ -170,7 +171,7 @@ def generate_sql(records, output_sql_path, include_backup_table=True):
                 comment += f" ({p_name_short})"
                 
         lines.append(
-            f"UPDATE dtb_product_class SET price01 = {p01_val}, price02 = {p02_val}, update_date = NOW() "
+            f"UPDATE dtb_product_class SET price01 = {p01_val}, price02 = {p02_val}, update_date = UTC_TIMESTAMP() "
             f"WHERE {where_clause};{comment}"
         )
     
@@ -180,7 +181,7 @@ def generate_sql(records, output_sql_path, include_backup_table=True):
     for i in range(0, len(product_ids), chunk_size):
         chunk = product_ids[i:i + chunk_size]
         ids_str = ", ".join(map(str, chunk))
-        lines.append(f"UPDATE dtb_product SET update_date = NOW() WHERE id IN ({ids_str});")
+        lines.append(f"UPDATE dtb_product SET update_date = UTC_TIMESTAMP() WHERE id IN ({ids_str});")
         
     lines.append("")
     lines.append("-- 3. コミット & セーフモード復元")
