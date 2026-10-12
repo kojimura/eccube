@@ -115,8 +115,7 @@ DB更新後は、商品情報のキャッシュをクリアしてサイト表示
 ```sql
 UPDATE dtb_product_class pc
 INNER JOIN bk_product_class_price_20261004_071356 bk ON pc.id = bk.id
-SET pc.price01 = bk.price01,
-    pc.price02 = bk.price02,
+SET pc.price02 = bk.price02,
     pc.update_date = bk.update_date;
 ```
 ※バックアップテーブル名は実行日時によって異なりますので、生成されたSQLの冒頭を確認してください。
