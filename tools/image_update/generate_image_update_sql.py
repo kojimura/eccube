@@ -10,7 +10,7 @@ dtb_product_image を商品ID単位で置換(DELETE → INSERT)するSQLファ�
 仕様:
   - 「商品画像」列はカンマ区切り (例: "a.png,b.png,c.png")。
     記載順に sort_no = 1, 2, 3... を割り当てます (先頭が1番目に表示)。
-  - 同一商品IDが複数行ある場合は最後の行を採用し、警告を表示します。
+  - 同一商品IDが複数行ある場合は**最初の行を採用**し、以降は警告を表示して無視します。
   - 商品画像が空の行はスキップ (既存画像を変更しない)。
   - dtb_product (商品レコード) 自体は変更しません。
   - dtb_product に存在しない商品IDは DELETE/INSERT とも対象外になります。
@@ -68,12 +68,12 @@ def parse_images(raw):
 
 
 def parse_csv(csv_path):
-    """CSVを読み込み、商品ごとの画像リストを抽出・検証 (同一商品IDは最後の行を採用)"""
+    """CSVを読み込み、商品ごとの画像リストを抽出・検証 (同一商品IDは最初の行を採用)"""
     encoding = detect_encoding(csv_path)
     products = {}   # product_id -> record
     errors = []
     warnings = []
-    stats = {'rows': 0, 'empty_rows': 0, 'dup_files': 0, 'overwrites': 0}
+    stats = {'rows': 0, 'empty_rows': 0, 'dup_files': 0, 'skipped_duplicate_rows': 0}
 
     with open(csv_path, 'r', encoding=encoding, newline='') as f:
         reader = csv.DictReader(f)
@@ -103,13 +103,9 @@ def parse_csv(csv_path):
                 continue
 
             if product_id in products:
-                stats['overwrites'] += 1
-                prev = products[product_id]
-                if prev['files'] != files:
-                    warnings.append((row_num, f"商品ID={product_id}: 行 {prev['row_num']} の画像指定を行 {row_num} で上書きします (最後の行を採用)"))
-                else:
-                    warnings.append((row_num, f"商品ID={product_id}: 行 {prev['row_num']} と同一内容の重複行です (最後の行を採用)"))
-                stats['dup_files'] -= prev['dup']
+                stats['skipped_duplicate_rows'] += 1
+                warnings.append((row_num, f"商品ID={product_id}: 先行行を採用するため、この行は無視します"))
+                continue
 
             stats['dup_files'] += dup
             products[product_id] = {
@@ -211,8 +207,8 @@ def main():
     print(f"    - 登録画像総数: {sum(len(r['files']) for r in records)} 件")
     if stats['dup_files']:
         print(f"    - [重複除去] 同一商品内で重複していた画像名: {stats['dup_files']} 件")
-    if stats['overwrites']:
-        print(f"    - [複数行検出] 同一商品IDの後続行で上書き: {stats['overwrites']} 件 (最後の行を採用)")
+    if stats['skipped_duplicate_rows']:
+        print(f"    - [複数行無視] 同一商品IDの後続行: {stats['skipped_duplicate_rows']} 件 (先頭行を採用)")
 
     if warnings:
         print(f"\n[!] 警告: {len(warnings)} 件")
