@@ -61,9 +61,24 @@ CREATE TABLE IF NOT EXISTS `dtb_product_class` (
   KEY `IDX_1A11D1BA9B418092` (`class_category_id2`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+-- 1-3. dtb_product_stock (在庫テーブル)
+--  ※ 在庫レコードが無いと、管理画面の商品検索で「全て」を選んだ際にエラーになる
+CREATE TABLE IF NOT EXISTS `dtb_product_stock` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `product_class_id` int(10) unsigned DEFAULT NULL,
+  `creator_id` int(10) unsigned DEFAULT NULL,
+  `stock` decimal(10,0) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  `update_date` datetime NOT NULL,
+  `discriminator_type` varchar(255) NOT NULL DEFAULT 'productstock',
+  PRIMARY KEY (`id`),
+  KEY `IDX_BC6C5DAE21B06187` (`product_class_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 -- --------------------------------------------------------------------
 -- 2. テストデータのクリーンアップ (再実行可能にするための削除)
 -- --------------------------------------------------------------------
+DELETE FROM `dtb_product_stock` WHERE `product_class_id` IN (1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008);
 DELETE FROM `dtb_product_class` WHERE `product_id` IN (101, 102, 103);
 DELETE FROM `dtb_product` WHERE `id` IN (101, 102, 103);
 
@@ -117,6 +132,23 @@ INSERT INTO `dtb_product_class` (
 -- ====================================================================
 (1008, 103, 1, 2, 6, 'TEST-COLOR-M-DISCONTINUED', 0, 0, 9999.00, 9999.00, 0, '2026-01-01 10:00:00', '2026-01-01 10:00:00', 'JPY', 'productclass');
 
+-- --------------------------------------------------------------------
+-- 5. 在庫データ投入 (dtb_product_stock)
+--  ※ 在庫レコードが無いと、商品検索で「全て」を選んだ際にエラーになるため、
+--    全規格 (1001〜1008) 分を登録する。stock は dtb_product_class.stock と同じ値。
+-- --------------------------------------------------------------------
+INSERT INTO `dtb_product_stock` (
+  `product_class_id`, `stock`, `create_date`, `update_date`, `discriminator_type`
+) VALUES
+(1001, 50, NOW(), NOW(), 'productstock'),
+(1002, 20, NOW(), NOW(), 'productstock'),
+(1003, 15, NOW(), NOW(), 'productstock'),
+(1004, 10, NOW(), NOW(), 'productstock'),
+(1005, 10, NOW(), NOW(), 'productstock'),
+(1006, 8, NOW(), NOW(), 'productstock'),
+(1007, 8, NOW(), NOW(), 'productstock'),
+(1008, 0, NOW(), NOW(), 'productstock');
+
 SET FOREIGN_KEY_CHECKS = @OLD_FOREIGN_KEY_CHECKS;
 
 -- ====================================================================
@@ -131,9 +163,11 @@ SELECT
   pc.class_category_id2 AS `規格2`,
   pc.price01 AS `変更前通常価格`,
   pc.price02 AS `変更前販売価格`,
+  ps.stock AS `在庫`,
   pc.visible AS `表示`,
   pc.update_date AS `更新日時`
 FROM dtb_product_class pc
 LEFT JOIN dtb_product p ON pc.product_id = p.id
+LEFT JOIN dtb_product_stock ps ON ps.product_class_id = pc.id
 WHERE pc.product_id IN (101, 102, 103)
 ORDER BY pc.product_id, pc.id;
