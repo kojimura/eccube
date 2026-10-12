@@ -134,14 +134,13 @@ def generate_sql(records, output_sql_path, include_backup_table=True):
     lines.append("SET SQL_SAFE_UPDATES = 0;")
     lines.append("START TRANSACTION;")
     lines.append("")
-    lines.append("-- 1. dtb_product_class の価格 (price01, price02) および update_date の更新")
+    lines.append("-- 1. dtb_product_class の価格 (price02) および update_date の更新")
     
     for r in records:
         pid = r['product_id']
         c1 = r['class_category_id1']
         c2 = r['class_category_id2']
         p02 = r['price02']
-        p01 = r['price01']
         
         # WHERE句 (規格1、規格2、visible=1)
         where_conds = [f"product_id = {pid}"]
@@ -159,7 +158,6 @@ def generate_sql(records, output_sql_path, include_backup_table=True):
         where_clause = " AND ".join(where_conds)
         
         # SET句
-        p01_val = f"{p01:.2f}" if p01 is not None else "NULL"
         p02_val = f"{p02:.2f}"
         
         comment = ""
@@ -171,7 +169,7 @@ def generate_sql(records, output_sql_path, include_backup_table=True):
                 comment += f" ({p_name_short})"
                 
         lines.append(
-            f"UPDATE dtb_product_class SET price01 = {p01_val}, price02 = {p02_val}, update_date = UTC_TIMESTAMP() "
+            f"UPDATE dtb_product_class SET price02 = {p02_val}, update_date = UTC_TIMESTAMP() "
             f"WHERE {where_clause};{comment}"
         )
     
