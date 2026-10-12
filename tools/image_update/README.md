@@ -2,7 +2,8 @@
 
 ## 概要
 EC-CUBE管理画面の「商品CSV登録」で規格商品を取り込むと商品IDが分裂してしまう問題を回避し、
-**既存の商品レコードを残したまま、商品画像のカンマ区切り文字列だけを上書きする**ためのSQLを生成する。(`price_update` と同じ方式)
+**商品レコード(`dtb_product`)は変更せず、商品画像テーブル(`dtb_product_image`)のみ**を
+商品ID単位で置換するSQLを生成する。(`price_update` と同じ方式)
 
 ```
 [指示CSV] (product_image.csv)
@@ -10,10 +11,10 @@ EC-CUBE管理画面の「商品CSV登録」で規格商品を取り込むと商�
    ▼
 [Pythonスクリプト] (generate_image_update_sql.py)
    │  ・文字コード判定
-   │  ・同一商品IDは最後の行を採用
-   │  ・同一商品IDが複数行ある場合は警告を表示
+   │  ・同一商品IDが複数行ある場合は最後の行を採用 (警告表示)
+   │  ・カンマ区切りを先頭から sort_no=1,2,3... に展開
+   │  ・画像名の重複除去 / 不正文字チェック
    │  ・事前バックアップテーブル作成クエリ付き
-   │  ・日時は UTC_TIMESTAMP() で格納
    │
    ▼
 [更新用SQL] (update_images.sql)
@@ -34,37 +35,53 @@ EC-CUBE管理画面の「商品CSV登録」で規格商品を取り込むと商�
 
 ---
 
-## 2. 入力CSVの仕様
+## 2. 対象テーブル `dtb_product_image`
+
+| カラム | 登録内容 |
+|---|---|
+| id | AUTO_INCREMENT (指定しない) |
+| product_id | CSVの商品ID |
+| creator_id | `dtb_product.creator_id` を引き継ぎ |
+| file_name | 画像ファイル名 |
+| sort_no | CSVの記載順 (先頭=1) |
+| create_date | `UTC_TIMESTAMP()` |
+| discriminator_type | `productimage` |
+
+---
+
+## 3. 入力CSVの仕様
 必須カラムは `商品ID` と `商品画像` のみ。その他の列は無視される。
 
-- `商品画像` : カンマ区切りの文字列をそのまま1フィールドへ保存する。
-- 同一商品IDの行が複数ある場合は、**最後の行を採用**する。
-- 同一商品IDの複数行は**警告を表示**する。
+- `商品画像` : カンマ区切りで複数指定 (例: `"cube-1.png,cube-2.png,cube-3.png"`)。**先頭から順に表示**される (`sort_no` = 1始まり)。
+- 規格商品は規格ごとに行が分かれるが、**同一商品IDが複数行ある場合は最後の行を採用**し、警告を表示する。
 - `商品画像` が空の行は**スキップ** (既存画像は変更されない)。
-- `商品画像` に制御文字が含まれる場合はエラーとして除外する。
+- 同一商品内で同じファイル名が重複している場合は、重複を除去する。
+- ファイル名に `\ / : * ? " < > |` や制御文字が含まれる場合はエラーとして除外する。
 
 ---
 
-## 3. SQLファイルの安全設計
+## 4. SQLファイルの安全設計
 1. **事前バックアップテーブルの自動作成**
-   `dtb_product` 全体を `bk_product_image_YYYYMMDD_HHMMSS` に退避する。
-2. **既存商品レコードを維持**
-   `dtb_product` の `product_image` と `update_date` のみを更新し、他のフィールドには一切触れない。
-3. **トランザクション保護**
+   `dtb_product_image` 全体を `bk_product_image_YYYYMMDD_HHMMSS` に退避する。
+2. **商品レコードは変更しない**
+   `dtb_product` / `dtb_product_class` (価格・在庫・規格) には一切書き込まない。
+3. **存在しない商品IDは対象外**
+   `dtb_product` に存在しない商品IDは DELETE も INSERT も行われない。
+4. **トランザクション保護**
    `START TRANSACTION;` 〜 `COMMIT;` で囲む。
-4. **更新方式は商品単位の上書き**
-   CSVの `商品画像` をそのまま `product_image` カラムに保存する。
-   複数画像はカンマ区切り文字列のまま1カラムに保持される。
-5. **日時の UTC 統一**
-   `update_date` は `UTC_TIMESTAMP()` を使用する。
-6. **SQLエスケープ**
-   画像文字列中の `'` や `\` はエスケープされる。
+5. **更新方式は商品単位の置換**
+   対象商品の既存画像を `DELETE` した後、CSVの順序で `INSERT` する。
+6. **日時の UTC 統一**
+   `create_date` は `UTC_TIMESTAMP()` を使用する。
+7. **SQLエスケープ**
+   ファイル名中の `'` や `\` はエスケープされる。
 
-> 注意: 画像ファイル自体は `html/upload/save_image/` に事前配置すること。
+> 注意: 画像を「置換」する仕様のため、CSVに記載のない既存画像はその商品から外れる。
+> 画像ファイル自体は `html/upload/save_image/` に事前配置すること。
 
 ---
 
-## 4. 手順
+## 5. 手順
 
 ### ステップ1: SQLファイルの生成
 ```bash
@@ -72,10 +89,13 @@ python3 generate_image_update_sql.py product_image.csv -o update_images.sql
 ```
 バックアップテーブルが不要な場合は `--no-backup-table` を付ける。
 
-### ステップ2: 生成されたSQLの確認
+### ステップ2: 画像ファイルの配置
+`html/upload/save_image/` にCSVで指定した画像ファイルをアップロードする。
+
+### ステップ3: 生成されたSQLの確認
 テキストエディタ等で `update_images.sql` の内容を確認する。
 
-### ステップ3: データベースへの適用
+### ステップ4: データベースへの適用
 
 #### パターンA: phpMyAdmin を使用する場合
 1. 対象の EC-CUBE データベースを選択する。
@@ -86,25 +106,35 @@ python3 generate_image_update_sql.py product_image.csv -o update_images.sql
 mysql -h <ホスト> -u <ユーザー名> -p <データベース名> < update_images.sql
 ```
 
-### ステップ4: EC-CUBEのキャッシュクリア
+Docker 環境の例:
+```bash
+docker exec -i ec-cube-mysql-1 mysql -u root -proot eccubedb < update_images.sql
+```
+
+### ステップ5: 結果確認
+```bash
+docker exec -it ec-cube-mysql-1 mysql -u root -proot eccubedb -e "SELECT product_id, file_name, sort_no FROM dtb_product_image ORDER BY product_id, sort_no;"
+```
+
+### ステップ6: EC-CUBEのキャッシュクリア
 - **管理画面**: 「コンテンツ管理 > キャッシュ管理」から削除
 - **コマンド**: `bin/console cache:clear --no-debug`
 
 ---
 
-## 5. ロールバック手順
-冒頭で作成されたバックアップテーブルから `dtb_product` を復元する。
+## 6. ロールバック手順
+冒頭で作成されたバックアップテーブルから `dtb_product_image` を復元する。
 
 ```sql
 START TRANSACTION;
-DELETE FROM dtb_product;
-INSERT INTO dtb_product SELECT * FROM bk_product_image_YYYYMMDD_HHMMSS;
+DELETE FROM dtb_product_image;
+INSERT INTO dtb_product_image SELECT * FROM bk_product_image_YYYYMMDD_HHMMSS;
 COMMIT;
 ```
 ※バックアップテーブル名は実行日時によって異なるため、生成されたSQLの冒頭を確認すること。
 
 ---
 
-## 6. 修正履歴
-- 2026-10-12: 商品画像のカンマ区切り文字列を `dtb_product.product_image` へ上書きする方式に修正。
-- 2026-10-12: 初版作成 (`price_update` を踏襲し、商品画像のみを更新するSQL生成ツールを追加)。
+## 7. 修正履歴
+- 2026-10-12: `dtb_product.product_image` が存在しない(Unknown column)ため、`dtb_product_image` を商品ID単位で DELETE → INSERT する方式に修正。同一商品IDは最後の行を採用し警告表示。
+- 2026-10-12: 初版作成。
